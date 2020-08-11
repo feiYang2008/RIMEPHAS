@@ -43,7 +43,7 @@ def init_GPIO():
     # Init GPIO pins
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(PIN_LED, GPIO.OUT)
-    GPIO.output(PIN_LED, True)
+    GPIO.output(PIN_LED, False)
     GPIO.setup(PIN_MOTORDETECT, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
     
     # Spi pins Init
@@ -90,14 +90,14 @@ def timeout():
     
 myfont = pygame.freetype.SysFont(pygame.freetype.get_default_font(), 20)
 
-activated = False
-print("dav")
+#init_GPIO()
+
 def GPIOfunction():
-    global numberOfActivations, irSensorThreshhold, dispenserEmpty, turnOffDispenser, dispenserRefilled, dispenserEmptyTemp, activated
+    global numberOfActivations, irSensorThreshhold, dispenserEmpty, turnOffDispenser, dispenserRefilled, dispenserEmptyTemp
     ADCvalue = readAdc(0, PIN_CLK, PIN_MISO, PIN_MOSI, PIN_CS)
     if(dispenserEmpty == False):
         turnOffDispenser = False
-    """
+
     # Motor activated and dispenser empty
     if(ADCvalue == 0 and GPIO.input(PIN_MOTORDETECT)):
         dispenserEmptyTemp += 1
@@ -115,18 +115,14 @@ def GPIOfunction():
         timer = Timer(1, timeout)
         timer.start()
         timer.join()
-    """
-    if not activated and GPIO.input(PIN_MOTORDETECT):          
+    if GPIO.input(PIN_MOTORDETECT):          
         print("Motor Activated!")
         #count number of times used
         numberOfActivations += 1
-        print("Activations: ", numberOfActivations)
-        activated = True
-        #timer = Timer(1, timeout)
-        #timer.start()
-        #timer.join()
-    elif activated and not GPIO.input(PIN_MOTORDETECT):
-        activated = False
+        print("Activations: ", numberOfActivations)        
+        timer = Timer(1, timeout)
+        timer.start()
+        timer.join()
     
     if(dispenserEmpty):
         #dev = pb.get_device('OnePlus 7 Pro')
@@ -244,6 +240,16 @@ menuicon = pygame.image.load("images/bg/menuicon.bmp")
 menuicon.set_alpha(None)
 menuicon.set_colorkey(COLORKEY)
 
+happyAltL = pygame.image.load("images/bg/bghappy4L.png")
+happyAltL.set_alpha(None)
+happyAltL.set_colorkey(COLORKEY)
+happyAltR = pygame.transform.flip(happyAltL, True, False)
+
+blinkAltL = pygame.image.load("images/bg/bgclosedgrey3L.png")
+blinkAltL.set_alpha(None)
+blinkAltL.set_colorkey(COLORKEY)
+blinkAltR = pygame.transform.flip(blinkAltL, True, False)
+
 ########## Load sounds ##########
 Hi_sanitizer = "sounds/Hi_sanitizer.mp3"
 Sorry_sanitizer = "sounds/Sorry_sanitizer.mp3"
@@ -358,16 +364,31 @@ def speech_in(cmd1, cmd2):
         elif findWholeWord(cmd2)(gin): no_detected = True
         
 def speech_out(index):
+    global BACKGROUND
     if LANGUAGE == "da-DK":
        index += 7
     pygame.mixer.init()
     pygame.mixer.music.load(sounds[index])
+    sound = AS.from_mp3(sounds[index])
+    raw_data = sound.raw_data
+    sample_rate = sound.frame_rate
+    amp_data = np.frombuffer(raw_data, dtype=np.int16)
+    amp_data = np.absolute(amp_data)
+    amax = np.amax(amp_data)
     pygame.mixer.music.play()
+    i = 0
     while pygame.mixer.music.get_busy():
         if threadevent.is_set():
             pygame.mixer.quit()
             return
-        pygame.time.Clock().tick(10)
+        ms = pygame.time.Clock().tick(30)
+        samples = int(sample_rate/(1000/ms))
+        out = np.average(amp_data[i*samples:(i+1)*samples])
+        i += 1
+        if not np.isnan(out):
+            color = 255 - int(255*out/amax)
+            BACKGROUND = (color,color,color)
+    BACKGROUND = WHITE
            
 def interaction():
     global show_buttons
@@ -382,10 +403,10 @@ def interaction():
                 speech_out(4)
                 flowState += 1
                 i = 0
-                #while not GPIO.input(PIN_MOTORDETECT): pygame.time.Clock().tick(10)
-                wait(3000)
+                while not GPIO.input(PIN_MOTORDETECT): pygame.time.Clock().tick(10)
+                wait(1000)
                 speech_out(1)
-            else:                                 
+            else:
                 global state
                 state = VIDEOSTATE
                 break
@@ -411,54 +432,43 @@ def playVideo():
     clip = VideoFileClip('handwashing.mp4', target_resolution=(480,800))
     clip.preview()
     
-def faceTracking(sender):
-    res1 = (320,240)
-    res2 = (640,480)
-    res3 = (1280,720)
-    res = res1
+res1 = (320,240)
+res2 = (640,480)
+res3 = (1280,720)
+res = res1    
 
+def faceTracking(sender):
     faceCascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
     cap = cv2.VideoCapture(-1)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, res[0])
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res[1])
-    frameCounter = 0
-    currentID = 0   
+    currentID = 1   
     faceTrackers = {}
-    
-    WIDTH = res[0]/2
-    HEIGHT = res[1]/2
-    EYE_DEPTH = 2
-    hFOV = 62/2
-    vFOV = 49/2
-    ppcm = WIDTH*2/15.5 * 1.5
     term = False
     while not term:
         ret, frame = cap.read()
         frame = cv2.rotate(frame, cv2.ROTATE_180)
-        frameCounter += 1
-        if frameCounter % 1 == 0:
-            grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = faceCascade.detectMultiScale(
-                grey,
-                scaleFactor = 1.1,
-                minNeighbors = 5,
-                minSize = (30, 30),                           
-                flags = cv2.CASCADE_SCALE_IMAGE)
-            for (x, y, w, h) in faces:
-                center = (int(x+w*0.5), int(y+h*0.5))
-                fidMatch = False
-                for fid in faceTrackers.keys():
-                    (tx, ty, tw, th, n, u) =  faceTrackers.get(fid)
-                    if tx <= center[0] <= tx+tw and ty <= center[1] <= ty+th:
-                        if n < 50: n += 1
-                        faceTrackers.update({fid:(x,y,w,h,n,True)})
-                        fidMatch = True
-                        break
-                if not fidMatch:
-                    faceTrackers.update({currentID:(x,y,w,h,1,True)})
-                    currentID += 1
-                    
-        trackID = -1
+        grey = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = faceCascade.detectMultiScale(
+            grey,
+            scaleFactor = 1.1,
+            minNeighbors = 5,
+            minSize = (30, 30),                           
+            flags = cv2.CASCADE_SCALE_IMAGE)
+        for (x, y, w, h) in faces:
+            center = (int(x+w*0.5), int(y+h*0.5))
+            fidMatch = False
+            for fid in faceTrackers.keys():
+                (tx, ty, tw, th, n, u) =  faceTrackers.get(fid)
+                if tx <= center[0] <= tx+tw and ty <= center[1] <= ty+th:
+                    if n < 50: n += 1
+                    faceTrackers.update({fid:(x,y,w,h,n,True)})
+                    fidMatch = True
+                    break
+            if not fidMatch:
+                faceTrackers.update({currentID:(x,y,w,h,1,True)})
+                currentID += 1
+
         fidsToDelete = []
         for fid in faceTrackers.keys():
             (tx, ty, tw, th, n, u) =  faceTrackers.get(fid)
@@ -466,45 +476,50 @@ def faceTracking(sender):
             if n < 1: fidsToDelete.append(fid)
             else:
                 faceTrackers.update({fid:(tx,ty,tw,th,n,False)})
-                if n < 25:
-                    pass
-                else:
-                    trackID = fid
-       
+
         for fid in fidsToDelete:
             faceTrackers.pop(fid, None)
+            
+        sender.send(faceTrackers)
         
-        if trackID != -1:
-            # determine who to track
-            (x, y, w, h, n, u) = faceTrackers.get(trackID)
-            center = (int(x+w*0.5), int(y+h*0.5))
-            hAngle = (1 - center[0]/WIDTH) * hFOV
-            vAngle = (1 - center[1]/HEIGHT) * vFOV            
-            c = -0.26*w+103
-            
-            # horizontal
-            b = 4
-            angleA = (90 - hAngle)*math.pi/180
-            a = math.sqrt(b*b + c*c - 2*b*c*math.cos(angleA))
-            angleC = math.acos((a*a + b*b - c*c)/(2*a*b))
-            pupilL = int((angleC - math.pi/2) * EYE_DEPTH * ppcm)
-            
-            b_hat = 2*b
-            c_hat = math.sqrt(a*a + b_hat*b_hat - 2*a*b_hat*math.cos(angleC))
-            angleA_hat = math.acos((b_hat*b_hat + c_hat*c_hat - a*a)/(2*b_hat*c_hat))
-            pupilR = int((math.pi/2 - angleA_hat) * EYE_DEPTH * ppcm)
-            
-            # vertical
-            b = 6
-            angleA = (90 - vAngle)*math.pi/180
-            a = math.sqrt(b*b + c*c - 2*b*c*math.cos(angleA))
-            angleC = math.acos((a*a + b*b - c*c)/(2*a*b))
-            pupilV = int((angleC - math.pi/2) * EYE_DEPTH * ppcm)
-            
-            sender.send((pupilL, pupilR, pupilV))
         if sender.poll():  
-            term = sender.recv()
+            term = sender.recv()   
     cap.release()
+
+def calculateAngles(x, y, w, h):
+    #globals
+    WIDTH = res[0]/2
+    HEIGHT = res[1]/2
+    EYE_DEPTH = 2
+    hFOV = 62/2
+    vFOV = 49/2
+    ppcm = WIDTH*2/15.5 * 1.5
+
+    center = (int(x+w*0.5), int(y+h*0.5))
+    hAngle = (1 - center[0]/WIDTH) * hFOV
+    vAngle = (1 - center[1]/HEIGHT) * vFOV            
+    c = -0.26*w+103
+    
+    global pupilL, pupilR, pupilV
+    # horizontal
+    b = 4
+    angleA = (90 - hAngle)*math.pi/180
+    a = math.sqrt(b*b + c*c - 2*b*c*math.cos(angleA))
+    angleC = math.acos((a*a + b*b - c*c)/(2*a*b))
+    pupilL = int((angleC - math.pi/2) * EYE_DEPTH * ppcm)
+    
+    b_hat = 2*b
+    c_hat = math.sqrt(a*a + b_hat*b_hat - 2*a*b_hat*math.cos(angleC))
+    angleA_hat = math.acos((b_hat*b_hat + c_hat*c_hat - a*a)/(2*b_hat*c_hat))
+    pupilR = int((math.pi/2 - angleA_hat) * EYE_DEPTH * ppcm)
+    
+    # vertical
+    b = 6
+    angleA = (90 - vAngle)*math.pi/180
+    a = math.sqrt(b*b + c*c - 2*b*c*math.cos(angleA))
+    angleC = math.acos((a*a + b*b - c*c)/(2*a*b))
+    pupilV = int((angleC - math.pi/2) * EYE_DEPTH * ppcm)
+    
 
 def drawPupils():
     pupilposL = (centerL[0]+pupilL, centerL[1]-pupilV)
@@ -541,6 +556,7 @@ HAPPYEVENT = pygame.USEREVENT + 5
 LISTENEVENT = pygame.USEREVENT + 6
 HAPPYSTARTEVENT = pygame.USEREVENT + 7
 QUESTIONEVENT = pygame.USEREVENT + 8
+INTERACTIONEVENT = pygame.USEREVENT + 9
 happyevent = pygame.event.Event(HAPPYSTARTEVENT)
 questionevent = pygame.event.Event(QUESTIONEVENT)
 
@@ -564,8 +580,12 @@ if __name__ == '__main__':
     tracking_proc = mp.Process(target=faceTracking, args=(sender,))
     tracking_proc.start()
 
+    flow = threading.Thread(target=interaction)
     threadevent = threading.Event()
-    init_GPIO()
+    trackID = 0
+    prevKeys = []
+    interactionTimer = False
+
     pygame.mouse.set_visible(False)
     clock = pygame.time.Clock()
     size = (800,480)
@@ -581,8 +601,39 @@ if __name__ == '__main__':
                     print("ESC")
                     done = True
                 elif event.key == pygame.K_s:
-                    flow = threading.Thread(target=interaction)
+                    #flow = threading.Thread(target=interaction)
                     flow.start()
+                elif event.key == pygame.K_1:
+                    screen.fill(BACKGROUND)
+                    blitImages(happyL, happyR)
+                    pygame.display.flip()
+                    wait(3000)
+                elif event.key == pygame.K_2:
+                    screen.fill(BACKGROUND)
+                    blitImages(happyAltL, happyAltR)
+                    pygame.display.flip()
+                    wait(3000)
+                elif event.key == pygame.K_3:
+                    screen.fill(BACKGROUND)
+                    blitImages(winkL, winkR)
+                    pygame.display.flip()
+                    wait(3000)
+                elif event.key == pygame.K_4:
+                    screen.fill(BACKGROUND)
+                    blitImages(closedL, closedR)
+                    pygame.display.flip()
+                    wait(300)
+                elif event.key == pygame.K_5:
+                    screen.fill(BACKGROUND)
+                    blitImages(blinkAltL, blinkAltR)
+                    pygame.display.flip()
+                    wait(300)
+                elif event.key == pygame.K_6:
+                    screen.fill(BACKGROUND)
+                    drawPupils()
+                    blitImages(questionL, questionR)
+                    pygame.display.flip()
+                    wait(2000)
             elif event.type == pygame.FINGERDOWN:
                 if show_buttons:
                     if event.x < 0.12 and event.y < 0.12:
@@ -634,13 +685,41 @@ if __name__ == '__main__':
                 elif event.type == QUESTIONEVENT:
                     pygame.time.set_timer(NORMALEVENT, 3000, True)
                     state = QUESTIONSTATE
-
-        ########## Check for face tracking ##########
-        if receiver.poll():  
-            (pupilL, pupilR, pupilV) = receiver.recv()
-        screen.fill(BACKGROUND)
+            if event.type == INTERACTIONEVENT:
+                interactionTimer = False
+                print("Interaction timer reset")
+        
+        
+        ########## Interaction ##########
+        runInteraction = False
+        if runInteraction:
+            if receiver.poll():
+                trackedList = receiver.recv()
+                               
+                if not flow.is_alive() and trackedList and not interactionTimer:
+                    peopleAmount = len(trackedList)
+                    keys = trackedList.keys()
+                    recurrents = set(keys) & set(prevKeys)
+                    print("Recurrents: ", recurrents)
+                    trackID = max(trackedList.items(), key = lambda i : i[1][4])[0]
+                    #calculate some weight
+                    print(trackID)
+                    if trackID and trackedList.get(trackID)[4] > 25:
+                        flow = threading.Thread(target=interaction)
+                        flow.start()
+                        interactionTimer = True
+                        pygame.time.set_timer(INTERACTIONEVENT, 100000, True)
+                        prevKeys = keys
+                        
+                if trackID in trackedList:
+                    (x, y, w, h, n, u) = trackedList.get(trackID)
+                    calculateAngles(x, y, w, h)
+                elif trackedList:
+                    trackID = max(trackedList.items(), key = lambda i : i[1][4])[0]
         
         ########## State Machine ##########
+        screen.fill(BACKGROUND)
+        
         if state == NORMALSTATE:
             blitImages(normalwhiteL, normalwhiteR)
             drawPupils()
@@ -676,7 +755,7 @@ if __name__ == '__main__':
             showButtons()
 
         screen.blit(menuicon, (5, 480-50))   
-        GPIOfunction()   
+        #GPIOfunction()   
         pygame.display.flip()
         #middle = time.time()
         #print(middle-start)
@@ -684,13 +763,17 @@ if __name__ == '__main__':
     interrupted = True
     threadevent.set()
     receiver.send(True)
+    """
     while receiver.poll():  
         (pupilL, pupilR, pupilV) = receiver.recv()
+    """
+    while receiver.poll():  
+        trackedList = receiver.recv()
     tracking_proc.terminate()
     tracking_proc.join()
     receiver.close()
     pygame.display.quit()
     pygame.quit()
-    GPIO.cleanup()
+    #GPIO.cleanup()
     print("Cleaned up")
     exit(0)

@@ -6,7 +6,7 @@ import time
 res1 = (320,240)
 res2 = (640,480)
 res3 = (1280,720)
-res = res3
+res = res2
 """
 camera = PiCamera()
 camera.rotation = 180
@@ -133,6 +133,20 @@ def main():
     while True:
         ret, frame = cap.read()
         frame = cv2.rotate(frame, cv2.ROTATE_180)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        #gray = cv2.rotate(gray, cv2.ROTATE_180)
+        
+        faces = faceCascade.detectMultiScale(
+            gray,
+            scaleFactor = 1.1,
+            minNeighbors = 5,
+            minSize = (3, 3),                         
+            flags = cv2.CASCADE_SCALE_IMAGE)
+        
+        recSize = 0
+        for (x, y, w, h) in faces:
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
+        
         """
         camera.capture(rawCapture, format="bgr")
         frame = rawCapture.array
